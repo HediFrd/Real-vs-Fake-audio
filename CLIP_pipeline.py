@@ -1,5 +1,11 @@
-# Load dataset
+import clip
+import numpy as np
 import os
+import pandas as pd
+from PIL import Image
+from sklearn.metrics.pairwise import cosine_similarity
+import torch
+from tqdm import tqdm
 
 # Path to your folder containing images (change this to your local path)
 IMG_DIR = "C:\Users\hedif\OneDrive\Desktop\Masters Project\dataset"
@@ -13,14 +19,6 @@ print(f"Found folder: {IMG_DIR}")
 # pip install torch torchvision pillow tqdm scikit-learn git+https://github.com/openai/CLIP.git
 
 # Load CLIP
-import clip
-import torch
-from PIL import Image
-from tqdm import tqdm
-from sklearn.metrics.pairwise import cosine_similarity
-import pandas as pd
-import numpy as np
-
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model, preprocess = clip.load("ViT-B/32", device=device, jit=False)
 

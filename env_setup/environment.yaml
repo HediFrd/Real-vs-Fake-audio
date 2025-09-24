@@ -1,0 +1,16 @@
+name: rf_audio
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.12.8
+  - pip=25.0
+  - pip:
+    - matplotlib==3.10.0
+    - numpy==2.3.0
+    - openai-clip==1.0.1
+    - pandas==2.3.0
+    - piq==0.8.0
+    - scikit-learn==1.6.1
+    - torchmetrics==1.6.1
