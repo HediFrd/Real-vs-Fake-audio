@@ -1,4 +1,4 @@
-name: rf_audio
+name: fora
 channels:
   - conda-forge
   - defaults
@@ -10,6 +10,7 @@ dependencies:
     - matplotlib==3.10.0
     - numpy==2.3.0
     - openai-clip==1.0.1
+    - opensoundscape==0.12.1
     - pandas==2.3.0
     - piq==0.8.0
     - scikit-learn==1.6.1
