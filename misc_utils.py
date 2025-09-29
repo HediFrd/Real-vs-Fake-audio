@@ -1,17 +1,24 @@
+import matplotlib.pyplot as plt
 import numpy as np
 from opensoundscape import Audio, Spectrogram
 import os
 from PIL import Image
+import random
 
-def gather_audio_metadata(aud_dir):
+def gather_audio_metadata(aud_dir, n_samples=None):
 
     duration = []
     frames = []
     sample_rate = []
 
+    aud_files = os.listdir(aud_dir)
+    if n_samples is not None:
+        random.shuffle(aud_files)
+        aud_files = aud_files[:n_samples]
+
     # Loop through each audio file, load it, and extract metadata
-    for aud_file in os.listdir(aud_dir):
-        if os.path.splitext(aud_file)[1] not in [".wav"]:
+    for aud_file in aud_files:
+        if os.path.splitext(aud_file)[1] not in [".wav", ".mp3"]:
             continue
 
         aud_obj = Audio.from_file(os.path.join(aud_dir, aud_file))
@@ -149,6 +156,7 @@ def rgb_spec_pipeline(aud_obj, max_freq_list, n_freqs, n_windows, target_duratio
     # max_freq_list is max_freq for each RGB
     # dB_min_list is dB_min for each RGB
     # dB_max_list is dB_max for each RGB
+    # Other variables are explained in predef_spec_size
 
     # Loop through each item for RGB and then get the corresponding spectrogram image
     spec_img_list = []
@@ -173,20 +181,24 @@ if __name__ == "__main__":
     print("Warning: Running __main__ from misc_utils.py")
 
     # Using the gather_audio_metadata function to gather metadata for an entire directory
-    # aud_dir = r"D:\FoRA\for-original\for-original\testing\real"
-    # dur, fr, sr = gather_audio_metadata(aud_dir)
+    # aud_dir = r"D:\Deep_Detect\dataset\training\real"
+    # dur, fr, sr = gather_audio_metadata(aud_dir, n_samples=2000)
+    # plt.hist(dur, bins=20)
+    # plt.show()
+    # print(np.mean(dur), np.std(dur), np.max(dur), np.min(dur))
+    # print(np.mean(sr), np.std(sr), np.max(sr), np.min(sr))
 
     # User inputs
-    aud_path = r"D:\FoRA\for-original\for-original\testing\real\file2.wav"
-    aud_obj = Audio.from_file(aud_path)
-    out_path = r"outputs/saved_spec5.png"
-    n_freqs = 256
-    n_windows = 256
-    target_duration = 5
-    overlap_correction = 0.9
-    max_freq_list = [8000, 8000, 2000]
-    dB_min_list = [None, -100, None]
-    dB_max_list = [None, -60, None]
+    # aud_path = r"D:\FoRA\for-original\for-original\testing\real\file2.wav"
+    # aud_obj = Audio.from_file(aud_path)
+    # out_path = r"outputs/saved_spec5.png"
+    # n_freqs = 256
+    # n_windows = 256
+    # target_duration = 5
+    # overlap_correction = 0.9
+    # max_freq_list = [8000, 8000, 2000]
+    # dB_min_list = [None, -100, None]
+    # dB_max_list = [None, -60, None]
 
     # Simple examples of calling each function
     # aud_obj = Audio.from_file(aud_path)
@@ -200,13 +212,13 @@ if __name__ == "__main__":
     # # Note the image range should correspond to the dB range in process_spectrogram or else you get brightness shifts
     # spec_img = spec_obj.to_image(shape=(256, 256), range=(dB_min, dB_max), invert=False).save(out_path)
 
-    aud_obj = Audio.from_file(aud_path)
+    # aud_obj = Audio.from_file(aud_path)
 
     # Example of generating a spectrogram of a predefined size and scale
     # spec_obj = predef_spec_size(aud_obj, max_freq=8000, n_freqs=n_freqs, n_windows=n_windows, target_duration=target_duration, overlap_correction=overlap_correction)
     # spec_img = spec_obj1.to_image(shape=(n_freqs, n_windows), invert=False).save(out_path)
 
-    # Example of using the pipeline to generate an RGB image of multiple spectrograms of identical size and scale
-    rgb_spec_img = rgb_spec_pipeline(aud_obj, max_freq_list, n_freqs, n_windows, target_duration, overlap_correction, dB_min_list, dB_max_list)
-    rgb_spec_img.save(out_path)
+    # Example of using the pipeline to generate an RGB image of multiple spectrograms of identical size
+    # rgb_spec_img = rgb_spec_pipeline(aud_obj, max_freq_list, n_freqs, n_windows, target_duration, overlap_correction, dB_min_list, dB_max_list)
+    # rgb_spec_img.save(out_path)
 

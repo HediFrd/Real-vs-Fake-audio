@@ -7,7 +7,7 @@ dependencies:
   - python=3.12.8
   - pip=25.0
   - pip:
-    - matplotlib==3.10.0
+    - matplotlib==3.9.0
     - numpy==2.3.0
     - openai-clip==1.0.1
     - opensoundscape==0.12.1
