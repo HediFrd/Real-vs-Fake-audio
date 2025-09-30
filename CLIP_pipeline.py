@@ -19,19 +19,23 @@ print(f"Found base folder: {BASE_DIR}")
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model, preprocess = clip.load("ViT-B/32", device=device, jit=False)
 
-# Collect image paths from both real and fake
+# Collect image paths
 img_paths = []
+labels = {}  # keep track of real/fake for each image
 for subdir in ["real", "fake"]:
     folder = os.path.join(BASE_DIR, subdir)
     if os.path.exists(folder):
         sub_paths = [os.path.join(folder, f) for f in os.listdir(folder)
                      if f.lower().endswith((".jpg", ".jpeg", ".png"))]
         img_paths.extend(sub_paths)
+        for p in sub_paths:
+            labels[p] = subdir
         print(f"Found {len(sub_paths)} images in {folder}")
     else:
         print(f" Skipping missing folder: {folder}")
 
 print(f"Total images found: {len(img_paths)}")
+
 
 # Encode images with CLIP
 def get_img_features(img_path):
@@ -62,3 +66,25 @@ df_sim = pd.DataFrame(sim_matrix,
 # Save similarity matrix
 df_sim.to_csv("img2img_similarity.csv")
 print("Saved img2img_similarity.csv")
+
+#  Compute stats 
+real_idx = [i for i, k in enumerate(keys) if labels[k] == "real"]
+fake_idx = [i for i, k in enumerate(keys) if labels[k] == "fake"]
+
+real_vs_real = sim_matrix[np.ix_(real_idx, real_idx)]
+fake_vs_fake = sim_matrix[np.ix_(fake_idx, fake_idx)]
+real_vs_fake = sim_matrix[np.ix_(real_idx, fake_idx)]
+
+def print_stats(name, mat):
+    # exclude diagonal for self-similarity
+    if mat.shape[0] == mat.shape[1]:
+        mat = mat[np.triu_indices_from(mat, k=1)]
+    print(f"\n{name} statistics:")
+    print(f"Mean: {np.mean(mat):.4f}")
+    print(f"Std:  {np.std(mat):.4f}")
+    print(f"Min:  {np.min(mat):.4f}")
+    print(f"Max:  {np.max(mat):.4f}")
+
+print_stats("Real vs Real", real_vs_real)
+print_stats("Fake vs Fake", fake_vs_fake)
+print_stats("Real vs Fake", real_vs_fake)
