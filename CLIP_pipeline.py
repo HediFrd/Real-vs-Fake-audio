@@ -8,7 +8,7 @@ import torch
 from tqdm import tqdm
 
 # Path to your folder containing images (change this to your local path)
-IMG_DIR = "C:\Users\hedif\OneDrive\Desktop\Masters Project\dataset"
+IMG_DIR = "C:\Users\hedif\OneDrive\Documents\GitHub\Real-vs-Fake-audio\spectrograms_CLIPTest"
 
 # Check if folder exists
 if not os.path.exists(IMG_DIR):

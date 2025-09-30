@@ -74,3 +74,58 @@ spec_inspect.amplitude()
 spec_img = spec_obj.to_image(shape=(224, 224), invert=False)
 spec_img.save(Path("./saved_spectrogram.png"))
 
+
+def batch_save_spectrograms_from_training_subset(training_root: str,output_root: str = "spectrograms_output",use_mel: bool = False,shape=(224, 224)):
+    """Walks the `training_subset` folder which is expected to contain
+    `real_subset` and `fake_subset` subfolders, converts each audio file to a
+    spectrogram image, and saves them to separate `real` and `fake` folders
+    under `output_root`.
+
+    Parameters
+    - training_root: path to the `training_subset` folder
+    - output_root: base output folder to write images into
+    - use_mel: if True, use MelSpectrogram, otherwise linear Spectrogram
+    - shape: (width, height) for saved image
+    """
+    training_root = Path(training_root)
+    output_root = Path(output_root)
+
+    if not training_root.exists():
+        raise FileNotFoundError(f"training_root does not exist: {training_root}")
+
+    mapping = {"real_subset": "real", "fake_subset": "fake"}
+
+    audio_extensions = (".wav", ".mp3", ".flac", ".ogg", ".m4a")
+
+    for subfolder_name, out_label in mapping.items():
+        in_dir = training_root / subfolder_name
+        out_dir = output_root / out_label
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        if not in_dir.exists():
+            print(f"Warning: expected folder missing: {in_dir}, skipping")
+            continue
+
+        for audio_path in sorted(in_dir.iterdir()):
+            if not audio_path.is_file() or audio_path.suffix.lower() not in audio_extensions:
+                continue
+            try:
+                aud = Audio.from_file(str(audio_path))
+                if use_mel:
+                    spec = MelSpectrogram.from_audio(aud)
+                else:
+                    spec = Spectrogram.from_audio(aud)
+                img = spec.to_image(shape=shape, invert=False)
+                out_path = out_dir / (audio_path.stem + ".png")
+                img.save(out_path)
+                print(f"Saved spectrogram for {audio_path.name} -> {out_path}")
+            except Exception as e:
+                print(f"Failed to process {audio_path}: {e}")
+
+
+if __name__ == "__main__":
+    # Example: process the training_subset next to the repo root
+    repo_root = Path(__file__).resolve().parents[1]
+    training_subset = repo_root / "training_subset"
+    batch_save_spectrograms_from_training_subset(str(training_subset), output_root=str(repo_root / "spectrograms_output"), use_mel=False)
+
