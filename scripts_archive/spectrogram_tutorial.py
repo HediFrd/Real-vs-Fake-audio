@@ -73,3 +73,4 @@ spec_inspect.amplitude()
 # Saving the spectrogram as an image with specified shape - can invert the color (white is more intense)
 spec_img = spec_obj.to_image(shape=(224, 224), invert=False)
 spec_img.save(Path("./saved_spectrogram.png"))
+
