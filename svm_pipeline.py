@@ -57,7 +57,7 @@ def train_svm_classifier(X, y):
         
         # Train SVM
         print(f"\nTraining fold {fold}/5...")
-        svm = SVC(kernel='linear', C=1.0, random_state=42, max_iter=10000, verbose=True)
+        svm = SVC(kernel='rbf', C=1.0, random_state=42, max_iter=10000, verbose=True)
         svm.fit(X_train, y_train)
         
         # Evaluate
@@ -103,48 +103,6 @@ def train_svm_classifier(X, y):
     final_svm.fit(X_scaled, y)
     
     return final_svm, scaler
-    
-    # Train SVM
-    print("Training SVM classifier...")
-    svm = SVC(kernel='linear', C=1.0, random_state=42, max_iter=1000, verbose=True)  # Using linear kernel for faster training
-    svm.fit(X_train_scaled, y_train)
-    
-    # Evaluate
-    train_score = svm.score(X_train_scaled, y_train)
-    test_score = svm.score(X_test_scaled, y_test)
-    
-    print(f"\nTraining accuracy: {train_score:.4f}")
-    print(f"Testing accuracy: {test_score:.4f}")
-    
-    # Detailed classification report
-    y_pred = svm.predict(X_test_scaled)
-    print("\nClassification Report:")
-    print(classification_report(y_test, y_pred, target_names=['Fake', 'Real']))
-    
-    # Plot confusion matrix
-    cm = confusion_matrix(y_test, y_pred)
-    plt.figure(figsize=(8, 6))
-    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
-    plt.title('Confusion Matrix')
-    plt.colorbar()
-    tick_marks = np.arange(2)
-    plt.xticks(tick_marks, ['Fake', 'Real'])
-    plt.yticks(tick_marks, ['Fake', 'Real'])
-    plt.xlabel('Predicted Label')
-    plt.ylabel('True Label')
-    
-    # Add numbers to the confusion matrix
-    thresh = cm.max() / 2.
-    for i, j in np.ndindex(cm.shape):
-        plt.text(j, i, format(cm[i, j], 'd'),
-                horizontalalignment="center",
-                color="white" if cm[i, j] > thresh else "black")
-    
-    plt.tight_layout()
-    plt.savefig('confusion_matrix.png')
-    plt.close()
-    
-    return svm, scaler
 
 def evaluate_on_test_set(model, scaler, test_base_path):
     print("\nEvaluating on test set...")
@@ -190,6 +148,33 @@ def evaluate_on_test_set(model, scaler, test_base_path):
     plt.savefig('test_confusion_matrix.png')
     plt.close()
 
+import joblib  # Add this at the top of the file with other imports
+
+def save_model(svm_classifier, scaler, base_path='saved_models'):
+    """Save the trained model and scaler for future use."""
+    os.makedirs(base_path, exist_ok=True)
+    
+    # Save the SVM model
+    model_path = os.path.join(base_path, 'svm_model.joblib')
+    joblib.dump(svm_classifier, model_path)
+    print(f"Saved SVM model to {model_path}")
+    
+    # Save the scaler
+    scaler_path = os.path.join(base_path, 'scaler.joblib')
+    joblib.dump(scaler, scaler_path)
+    print(f"Saved scaler to {scaler_path}")
+
+def load_model(base_path='saved_models'):
+    """Load the trained model and scaler."""
+    model_path = os.path.join(base_path, 'svm_model.joblib')
+    scaler_path = os.path.join(base_path, 'scaler.joblib')
+    
+    svm_classifier = joblib.load(model_path)
+    scaler = joblib.load(scaler_path)
+    print("Loaded saved model and scaler")
+    
+    return svm_classifier, scaler
+
 def main():
     # Path to your spectrograms
     train_base_path = 'spectrograms_output'
@@ -206,6 +191,9 @@ def main():
     
     # Train and evaluate the classifier
     svm_classifier, scaler = train_svm_classifier(X, y)
+    
+    # Save the model and scaler
+    save_model(svm_classifier, scaler)
     
     # Evaluate on test set
     evaluate_on_test_set(svm_classifier, scaler, test_base_path)
