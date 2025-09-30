@@ -7,26 +7,31 @@ from sklearn.metrics.pairwise import cosine_similarity
 import torch
 from tqdm import tqdm
 
-# Path to your folder containing images (change this to your local path)
-IMG_DIR = "C:\Users\hedif\OneDrive\Documents\GitHub\Real-vs-Fake-audio\spectrograms_CLIPTest"
+# Path to your main folder containing "real" and "fake"
+BASE_DIR = r"C:\Users\hedif\OneDrive\Documents\GitHub\Real-vs-Fake-audio\spectrograms_output"
 
 # Check if folder exists
-if not os.path.exists(IMG_DIR):
-    raise Exception(f"Folder does not exist: {IMG_DIR}")
-print(f"Found folder: {IMG_DIR}")
-
-# Make sure required packages are installed via terminal:
-# pip install torch torchvision pillow tqdm scikit-learn git+https://github.com/openai/CLIP.git
+if not os.path.exists(BASE_DIR):
+    raise Exception(f"Folder does not exist: {BASE_DIR}")
+print(f"Found base folder: {BASE_DIR}")
 
 # Load CLIP
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model, preprocess = clip.load("ViT-B/32", device=device, jit=False)
 
-# Gather all image paths
-img_paths = [os.path.join(IMG_DIR, f) for f in os.listdir(IMG_DIR)
-             if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+# Collect image paths from both real and fake
+img_paths = []
+for subdir in ["real", "fake"]:
+    folder = os.path.join(BASE_DIR, subdir)
+    if os.path.exists(folder):
+        sub_paths = [os.path.join(folder, f) for f in os.listdir(folder)
+                     if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+        img_paths.extend(sub_paths)
+        print(f"Found {len(sub_paths)} images in {folder}")
+    else:
+        print(f" Skipping missing folder: {folder}")
 
-print(f"Found {len(img_paths)} images in {IMG_DIR}")
+print(f"Total images found: {len(img_paths)}")
 
 # Encode images with CLIP
 def get_img_features(img_path):
