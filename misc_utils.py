@@ -217,14 +217,17 @@ class Spectrogram_Dataset(Dataset):
         # Get file and label
         if idx < self.n_real:
             aud_path = self.real_paths[idx]
-            label = torch.tensor(1.)
+            label = torch.tensor(1).long()
         else:
             aud_path = self.fake_paths[idx - self.n_real]
-            label = torch.tensor(0.)
+            label = torch.tensor(0).long()
 
         # Process audio to specified duration
-        aud_obj = Audio.from_file(aud_path)
-        if aud_obj.duration < self.aud_tgt_dur:
+        try:
+            aud_obj = Audio.from_file(aud_path)
+        except:
+            return torch.zeros((3, self.spec_size[0], self.spec_size[1])), torch.tensor(0).long()
+        if aud_obj.duration <= self.aud_tgt_dur:
             # Just loop to meet target duration
             aud_obj, _, _ = process_audio(aud_obj, loop_to=self.aud_tgt_dur)
         elif self.aud_rand_start:
@@ -247,8 +250,24 @@ class Spectrogram_Dataset(Dataset):
 
         return spec_img, label
 
+def file_quarantine(aud_dir):
+    quarantine_list = []
+    aud_files = os.listdir(aud_dir)
+    for aud_file in aud_files:
+        aud_path = os.path.join(aud_dir, aud_file)
+        try:
+            Audio.from_file(aud_path)
+        except:
+            print(f"Error loading {aud_path}")
+            quarantine_list.append(aud_path)
+
+    return quarantine_list
+
 if __name__ == "__main__":
     print("Warning: Running __main__ from misc_utils.py")
+
+    # aud_dir = r"D:\Deep_Detect\dataset\training\real"
+    # _ = file_quarantine(aud_dir)
 
     # Using the gather_audio_metadata function to gather metadata for an entire directory
     # aud_dir = r"D:\Deep_Detect\dataset\training\real"
