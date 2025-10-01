@@ -6,6 +6,7 @@ from PIL import Image
 import random
 import torch
 from torch.utils.data import Dataset
+import torchvision.transforms as tvt
 
 def gather_audio_metadata(aud_dir, n_samples=None):
 
@@ -158,11 +159,14 @@ def rgb_spec_pipeline(aud_obj, max_freq_list, n_freqs, n_windows, target_duratio
     # dB_min_list is dB_min for each RGB
     # dB_max_list is dB_max for each RGB
     # Other variables are explained in predef_spec_size
-    # If max_freq_list, dB_min_list, and dB_max_list are all of the same values or only contain a single value, the final image will be grayscale
+    # If max_freq_list, dB_min_list, and dB_max_list are length 1 or all of the same values, the final image will be grayscale
+
+    assert len(max_freq_list) == len(dB_min_list)
+    assert len(max_freq_list) == len(dB_max_list)
 
     # Loop through each item for RGB and then get the corresponding spectrogram image
     spec_img_list = []
-    for ii in range(3):
+    for ii in range(len(max_freq_list)):
         spec_obj = predef_spec_size(aud_obj, max_freq=max_freq_list[ii], n_freqs=n_freqs, n_windows=n_windows,
                                     target_duration=target_duration, overlap_correction=overlap_correction)
         if dB_min_list[ii] is not None and dB_max_list[ii] is not None:
@@ -174,28 +178,36 @@ def rgb_spec_pipeline(aud_obj, max_freq_list, n_freqs, n_windows, target_duratio
         spec_img_list.append(spec_img)
 
     # Concatenate spectrogram images to form final RGB image
-    final_arr = np.stack([np.asarray(spec_img_list[0]), np.asarray(spec_img_list[1]), np.asarray(spec_img_list[2])], axis=2)
-    final_img = Image.fromarray(final_arr)
+    final_arr = np.stack([np.asarray(spec_img) for spec_img in spec_img_list], axis=2)
+    final_img = Image.fromarray(final_arr.squeeze())
 
     return final_img
 
 
-class SpectrogramDataset(Dataset):
+class Spectrogram_Dataset(Dataset):
     """Dataset for loading and processing audio files then converting to spectrograms"""
 
-    def __init__(self, real_root, fake_root, aud_tgt_dur=5, aud_rand_start=True, spec_size=(256, 256), max_freq_list=[8000], dB_min_list=[None], dB_max_list=[None]):
+    def __init__(self, real_root, fake_root, aud_tgt_dur=5, aud_rand_start=True, spec_size=(256, 256), max_freq_list=[8000], dB_min_list=[None], dB_max_list=[None], transform=None):
         real_files = os.listdir(real_root)
         self.real_paths = [os.path.join(real_root, real_file) for real_file in real_files]
         self.n_real = len(self.real_paths)
-        fake_files = os.listdir(fake_root)
-        self.fake_paths = [os.path.join(fake_root, fake_file) for fake_file in fake_files]
-        self.n_fake = len(self.fake_paths)
+        if fake_root is not None:
+            fake_files = os.listdir(fake_root)
+            self.fake_paths = [os.path.join(fake_root, fake_file) for fake_file in fake_files]
+            self.n_fake = len(self.fake_paths)
+        else:
+            self.n_fake = 0
         self.aud_tgt_dur = aud_tgt_dur
         self.aud_rand_start = aud_rand_start
         self.spec_size = spec_size
         self.max_freq_list = max_freq_list
         self.dB_min_list = dB_min_list
         self.dB_max_list = dB_max_list
+
+        if transform is None:
+            self.transform = tvt.Compose([tvt.ToTensor()])
+        else:
+            self.transform = transform
 
     def __len__(self):
         return self.n_real + self.n_fake
@@ -217,8 +229,8 @@ class SpectrogramDataset(Dataset):
             aud_obj, _, _ = process_audio(aud_obj, loop_to=self.aud_tgt_dur)
         elif self.aud_rand_start:
             # Sample random length inside audio of target duration
-            dur_frames = aud_obj.sample_rate * self.aud_tgt_dur
-            start_frame = torch.randint(low=0, high=aud_obj.frames - dur_frames)
+            dur_frames = int(aud_obj.sample_rate * self.aud_tgt_dur)
+            start_frame = torch.randint(low=0, high=(len(aud_obj.samples) - dur_frames), size=(1,))
             aud_obj, _, _ = process_audio(aud_obj, t_min=start_frame / aud_obj.sample_rate,
                                           t_max=(start_frame + dur_frames) / aud_obj.sample_rate)
         else:
@@ -231,6 +243,7 @@ class SpectrogramDataset(Dataset):
         # Essentially need to set aud_tgt_dur and aud_samp_rate intelligently to ensure they don't need to be recast unexpectedly
         spec_img = rgb_spec_pipeline(aud_obj, max_freq_list=self.max_freq_list, n_freqs=self.spec_size[0], n_windows=self.spec_size[1],
                                      target_duration=self.aud_tgt_dur, overlap_correction=0.9, dB_min_list=self.dB_min_list, dB_max_list=self.dB_max_list)
+        spec_img = self.transform(spec_img.convert("RGB"))
 
         return spec_img, label
 
