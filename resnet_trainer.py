@@ -1,4 +1,6 @@
+import csv
 from misc_utils import Spectrogram_Dataset
+import os
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -12,7 +14,10 @@ train_real_root = r"D:\Deep_Detect\dataset\training\real"
 train_fake_root = r"D:\Deep_Detect\dataset\training\fake"
 test_real_root = r"D:\Deep_Detect\dataset\testing\real"
 test_fake_root = r"D:\Deep_Detect\dataset\testing\fake"
-aud_tgt_dur = 5  # Target duration for audio sample
+holdout_root = r"D:\Deep_Detect\dataset\holdout"
+holdout_csv = r"C:\Users\jeremy\Python_Projects\Real-vs-Fake-audio\holdout_csv"
+train_dur_range = [5, 5]  # Range of audio target durations for training
+test_dur_range = [5, 5]  # Range of audio target durations for testing
 aud_rand_start = True  # Whether to start the audio sampling at a random point
 spec_size = (224, 224)  # Number of frequencies and number of windows in the spectrogram
 max_freq_list = [8000, 8000, 2000]  # Maximum frequency on the spectrogram scale - list of 1 or 3 elements
@@ -27,9 +32,11 @@ train_transform = tvt.Compose([
         tvt.ToTensor()
     ])
 test_transform = tvt.Compose([tvt.ToTensor()])
+holdout_transform = test_transform
 
 # Training settings
 model_state_dict = None  # If you want to load a pretrained model file, write the file path here
+# model_state_dict = r"C:\Users\jeremy\Python_Projects\Real-vs-Fake-audio\best_model_statedict_saved.pth"
 n_epochs = 10  # Number of training epochs
 batch_size = 16  # Training and evaluation batch size
 init_lr = 0.5  # Initial learning rate before cosine decay
@@ -37,14 +44,15 @@ weight_decay = 1e-4  # Weight decay
 momentum = 0.9  # Momentum
 eval_dataset_frac = 0.2  # Fraction of the evaluation dataset to evaluate - set to 1 to evaluate full dataset
 
-
 def main():
 
     # Define train/test datasets and dataloaders
-    train_dataset = Spectrogram_Dataset(train_real_root, train_fake_root, aud_tgt_dur, aud_rand_start, spec_size, max_freq_list, dB_min_list, dB_max_list, train_transform)
+    train_dataset = Spectrogram_Dataset(train_real_root, train_fake_root, train_dur_range, aud_rand_start, spec_size, max_freq_list, dB_min_list, dB_max_list, train_transform)
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
-    test_dataset = Spectrogram_Dataset(test_real_root, test_fake_root, aud_tgt_dur, aud_rand_start, spec_size, max_freq_list, dB_min_list, dB_max_list, test_transform)
+    test_dataset = Spectrogram_Dataset(test_real_root, test_fake_root, test_dur_range, aud_rand_start, spec_size, max_freq_list, dB_min_list, dB_max_list, test_transform)
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+    holdout_dataset = Spectrogram_Dataset(holdout_root, None, test_dur_range, aud_rand_start, spec_size, max_freq_list, dB_min_list, dB_max_list, test_transform)
+    holdout_dataloader = DataLoader(holdout_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 
     # Define model
     model = resnet18(weights=None, num_classes=2).to(device)
@@ -57,7 +65,7 @@ def main():
     lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=len(train_dataloader) * n_epochs)
 
     # Initial eval
-    eval_loop(model, test_dataloader, eval_dataset_frac)
+    eval_loop(model, test_dataloader)
 
     # Training loop
     best_test_acc = 0.5
@@ -70,6 +78,8 @@ def main():
             print("Saving new best model\n")
             torch.save(model.state_dict(), f"best_model_statedict.pth")
             best_test_acc = curr_test_acc
+
+    # holdout_loop(model, holdout_dataloader, holdout_dataset, holdout_csv)
 
 def train_one_epoch(epoch, model, train_dataloader, optimizer, lr_scheduler):
     print("\nTraining 1 epoch")
@@ -123,6 +133,22 @@ def eval_loop(model, test_dataloader):
     print(f"Test Accuracy: {eval_acc}\n")
     return n_real_correct, n_real_incorrect, n_fake_correct, n_fake_incorrect, eval_acc
 
+def holdout_loop(model, holdout_dataloader, holdout_dataset, holdout_csv):
+    print("\nEvaluating holdout")
+
+    model_preds = []
+    model.eval()
+    with torch.no_grad():
+        for ii, (images, labels) in enumerate(holdout_dataloader):
+            images = images.to(device)
+            output = model(images)
+            model_preds.extend(torch.argmax(output, dim=1).tolist())
+
+    files_list = [os.path.basename(aud_file) for aud_file in holdout_dataset.real_paths]
+    with open(holdout_csv, "w", newline="") as f:
+        out_writer = csv.writer(f, delimiter=",")
+        for file_pred in zip(files_list, model_preds):
+            out_writer.writerow([file_pred[0], file_pred[1]])
 
 if __name__ == "__main__":
     main()

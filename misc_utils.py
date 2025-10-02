@@ -124,6 +124,7 @@ def predef_spec_size(aud_obj, max_freq, n_freqs, n_windows, target_duration=None
         target_duration = aud_obj.duration
     target_duration = max(target_duration, min_duration)
     target_duration = min(target_duration, max_duration)
+    target_duration = int(target_duration * sample_rate) / sample_rate  # Floors the target duration to the nearest divisible unit
 
     aud_obj, _, _ = process_audio(aud_obj, resample_rate=resample_rate, loop_to=target_duration, t_max=target_duration)
 
@@ -187,17 +188,17 @@ def rgb_spec_pipeline(aud_obj, max_freq_list, n_freqs, n_windows, target_duratio
 class Spectrogram_Dataset(Dataset):
     """Dataset for loading and processing audio files then converting to spectrograms"""
 
-    def __init__(self, real_root, fake_root, aud_tgt_dur=5, aud_rand_start=True, spec_size=(256, 256), max_freq_list=[8000], dB_min_list=[None], dB_max_list=[None], transform=None):
+    def __init__(self, real_root, fake_root, aud_dur_range=[3, 5], aud_rand_start=True, spec_size=(256, 256), max_freq_list=[8000], dB_min_list=[None], dB_max_list=[None], transform=None):
         real_files = os.listdir(real_root)
-        self.real_paths = [os.path.join(real_root, real_file) for real_file in real_files]
+        self.real_paths = sorted([os.path.join(real_root, real_file) for real_file in real_files])
         self.n_real = len(self.real_paths)
         if fake_root is not None:
             fake_files = os.listdir(fake_root)
-            self.fake_paths = [os.path.join(fake_root, fake_file) for fake_file in fake_files]
+            self.fake_paths = sorted([os.path.join(fake_root, fake_file) for fake_file in fake_files])
             self.n_fake = len(self.fake_paths)
         else:
             self.n_fake = 0
-        self.aud_tgt_dur = aud_tgt_dur
+        self.aud_dur_range = aud_dur_range
         self.aud_rand_start = aud_rand_start
         self.spec_size = spec_size
         self.max_freq_list = max_freq_list
@@ -226,26 +227,29 @@ class Spectrogram_Dataset(Dataset):
         try:
             aud_obj = Audio.from_file(aud_path)
         except:
+            # Return zeros tensor with fake label
             return torch.zeros((3, self.spec_size[0], self.spec_size[1])), torch.tensor(0).long()
-        if aud_obj.duration <= self.aud_tgt_dur:
+
+        aud_tgt_dur = torch.rand(size=(1,)).item() * (self.aud_dur_range[1] - self.aud_dur_range[0]) + self.aud_dur_range[0]
+        if aud_obj.duration <= aud_tgt_dur:
             # Just loop to meet target duration
-            aud_obj, _, _ = process_audio(aud_obj, loop_to=self.aud_tgt_dur)
+            aud_obj, _, _ = process_audio(aud_obj, loop_to=aud_tgt_dur)
         elif self.aud_rand_start:
             # Sample random length inside audio of target duration
-            dur_frames = int(aud_obj.sample_rate * self.aud_tgt_dur)
+            dur_frames = int(aud_obj.sample_rate * aud_tgt_dur)
             start_frame = torch.randint(low=0, high=(len(aud_obj.samples) - dur_frames), size=(1,))
             aud_obj, _, _ = process_audio(aud_obj, t_min=start_frame / aud_obj.sample_rate,
                                           t_max=(start_frame + dur_frames) / aud_obj.sample_rate)
         else:
             # Get clip at beginning of audio
-            aud_obj, _, _ = process_audio(aud_obj, t_max=self.aud_tgt_dur)
+            aud_obj, _, _ = process_audio(aud_obj, t_max=aud_tgt_dur)
 
         # Make the spectrogram image
         # Note that the spec pipeline will possibly redo the aud_obj processing for target duration
         # This is necessary to get the spectrogram of the correct size and scale
         # Essentially need to set aud_tgt_dur and aud_samp_rate intelligently to ensure they don't need to be recast unexpectedly
         spec_img = rgb_spec_pipeline(aud_obj, max_freq_list=self.max_freq_list, n_freqs=self.spec_size[0], n_windows=self.spec_size[1],
-                                     target_duration=self.aud_tgt_dur, overlap_correction=0.9, dB_min_list=self.dB_min_list, dB_max_list=self.dB_max_list)
+                                     target_duration=aud_tgt_dur, overlap_correction=0.9, dB_min_list=self.dB_min_list, dB_max_list=self.dB_max_list)
         spec_img = self.transform(spec_img.convert("RGB"))
 
         return spec_img, label
