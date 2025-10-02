@@ -4,6 +4,9 @@ from opensoundscape import Audio, Spectrogram
 import os
 from PIL import Image
 import random
+import torch
+from torch.utils.data import Dataset
+import torchvision.transforms as tvt
 
 def gather_audio_metadata(aud_dir, n_samples=None):
 
@@ -94,7 +97,6 @@ def process_spectrogram(spec_obj, t_min=None, t_max=None, f_min=None, f_max=None
 
     return spec_obj
 
-
 def predef_spec_size(aud_obj, max_freq, n_freqs, n_windows, target_duration=None, overlap_correction=0.9):
     # max_freq [Hz] Max frequency plotted spectrogram
     # n_freqs [-] Number of frequencies utilized by spectrogram (y-axis length)
@@ -157,10 +159,14 @@ def rgb_spec_pipeline(aud_obj, max_freq_list, n_freqs, n_windows, target_duratio
     # dB_min_list is dB_min for each RGB
     # dB_max_list is dB_max for each RGB
     # Other variables are explained in predef_spec_size
+    # If max_freq_list, dB_min_list, and dB_max_list are length 1 or all of the same values, the final image will be grayscale
+
+    assert len(max_freq_list) == len(dB_min_list)
+    assert len(max_freq_list) == len(dB_max_list)
 
     # Loop through each item for RGB and then get the corresponding spectrogram image
     spec_img_list = []
-    for ii in range(3):
+    for ii in range(len(max_freq_list)):
         spec_obj = predef_spec_size(aud_obj, max_freq=max_freq_list[ii], n_freqs=n_freqs, n_windows=n_windows,
                                     target_duration=target_duration, overlap_correction=overlap_correction)
         if dB_min_list[ii] is not None and dB_max_list[ii] is not None:
@@ -172,13 +178,96 @@ def rgb_spec_pipeline(aud_obj, max_freq_list, n_freqs, n_windows, target_duratio
         spec_img_list.append(spec_img)
 
     # Concatenate spectrogram images to form final RGB image
-    final_arr = np.stack([np.asarray(spec_img_list[0]), np.asarray(spec_img_list[1]), np.asarray(spec_img_list[2])], axis=2)
-    final_img = Image.fromarray(final_arr)
+    final_arr = np.stack([np.asarray(spec_img) for spec_img in spec_img_list], axis=2)
+    final_img = Image.fromarray(final_arr.squeeze())
 
     return final_img
 
+
+class Spectrogram_Dataset(Dataset):
+    """Dataset for loading and processing audio files then converting to spectrograms"""
+
+    def __init__(self, real_root, fake_root, aud_tgt_dur=5, aud_rand_start=True, spec_size=(256, 256), max_freq_list=[8000], dB_min_list=[None], dB_max_list=[None], transform=None):
+        real_files = os.listdir(real_root)
+        self.real_paths = [os.path.join(real_root, real_file) for real_file in real_files]
+        self.n_real = len(self.real_paths)
+        if fake_root is not None:
+            fake_files = os.listdir(fake_root)
+            self.fake_paths = [os.path.join(fake_root, fake_file) for fake_file in fake_files]
+            self.n_fake = len(self.fake_paths)
+        else:
+            self.n_fake = 0
+        self.aud_tgt_dur = aud_tgt_dur
+        self.aud_rand_start = aud_rand_start
+        self.spec_size = spec_size
+        self.max_freq_list = max_freq_list
+        self.dB_min_list = dB_min_list
+        self.dB_max_list = dB_max_list
+
+        if transform is None:
+            self.transform = tvt.Compose([tvt.ToTensor()])
+        else:
+            self.transform = transform
+
+    def __len__(self):
+        return self.n_real + self.n_fake
+
+    def __getitem__(self, idx):
+
+        # Get file and label
+        if idx < self.n_real:
+            aud_path = self.real_paths[idx]
+            label = torch.tensor(1).long()
+        else:
+            aud_path = self.fake_paths[idx - self.n_real]
+            label = torch.tensor(0).long()
+
+        # Process audio to specified duration
+        try:
+            aud_obj = Audio.from_file(aud_path)
+        except:
+            return torch.zeros((3, self.spec_size[0], self.spec_size[1])), torch.tensor(0).long()
+        if aud_obj.duration <= self.aud_tgt_dur:
+            # Just loop to meet target duration
+            aud_obj, _, _ = process_audio(aud_obj, loop_to=self.aud_tgt_dur)
+        elif self.aud_rand_start:
+            # Sample random length inside audio of target duration
+            dur_frames = int(aud_obj.sample_rate * self.aud_tgt_dur)
+            start_frame = torch.randint(low=0, high=(len(aud_obj.samples) - dur_frames), size=(1,))
+            aud_obj, _, _ = process_audio(aud_obj, t_min=start_frame / aud_obj.sample_rate,
+                                          t_max=(start_frame + dur_frames) / aud_obj.sample_rate)
+        else:
+            # Get clip at beginning of audio
+            aud_obj, _, _ = process_audio(aud_obj, t_max=self.aud_tgt_dur)
+
+        # Make the spectrogram image
+        # Note that the spec pipeline will possibly redo the aud_obj processing for target duration
+        # This is necessary to get the spectrogram of the correct size and scale
+        # Essentially need to set aud_tgt_dur and aud_samp_rate intelligently to ensure they don't need to be recast unexpectedly
+        spec_img = rgb_spec_pipeline(aud_obj, max_freq_list=self.max_freq_list, n_freqs=self.spec_size[0], n_windows=self.spec_size[1],
+                                     target_duration=self.aud_tgt_dur, overlap_correction=0.9, dB_min_list=self.dB_min_list, dB_max_list=self.dB_max_list)
+        spec_img = self.transform(spec_img.convert("RGB"))
+
+        return spec_img, label
+
+def file_quarantine(aud_dir):
+    quarantine_list = []
+    aud_files = os.listdir(aud_dir)
+    for aud_file in aud_files:
+        aud_path = os.path.join(aud_dir, aud_file)
+        try:
+            Audio.from_file(aud_path)
+        except:
+            print(f"Error loading {aud_path}")
+            quarantine_list.append(aud_path)
+
+    return quarantine_list
+
 if __name__ == "__main__":
     print("Warning: Running __main__ from misc_utils.py")
+
+    # aud_dir = r"D:\Deep_Detect\dataset\training\real"
+    # _ = file_quarantine(aud_dir)
 
     # Using the gather_audio_metadata function to gather metadata for an entire directory
     # aud_dir = r"D:\Deep_Detect\dataset\training\real"
