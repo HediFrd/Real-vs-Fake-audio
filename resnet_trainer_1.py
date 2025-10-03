@@ -14,8 +14,8 @@ train_real_root = r"../Datasets/Deep_Detect/dataset/training/real"
 train_fake_root = r"../Datasets/Deep_Detect/dataset/training/fake"
 test_real_root = r"../Datasets/Deep_Detect/dataset/testing/real"
 test_fake_root = r"../Datasets/Deep_Detect/dataset/testing/fake"
-holdout_root = r"D:\Deep_Detect\dataset\holdout"
-holdout_csv = r"C:\Users\jeremy\Python_Projects\Real-vs-Fake-audio\holdout_csv"
+holdout_root = r"../Datasets/Deep_Detect/dataset/holdout"
+holdout_csv = r"outputs/holdout_1.csv"  # Write holdout results to here
 train_dur_range = [3, 3]  # Range of audio target durations for training
 test_dur_range = [3, 3]  # Range of audio target durations for testing
 aud_rand_start = True  # Whether to start the audio sampling at a random point
@@ -34,8 +34,11 @@ train_transform = tvt.Compose([
 test_transform = tvt.Compose([tvt.ToTensor()])
 holdout_transform = test_transform
 
+# Model settings
+model_load_path = None  # Resume training/evaluation from the state_dict here
+model_save_path = r"saved_models/best_resnet_statedict_1.pth"  # After training, save state_dict to here
+
 # Training settings
-model_state_dict = None  # If you want to load a pretrained model file, write the file path here
 n_epochs = 10  # Number of training epochs
 batch_size = 16  # Training and evaluation batch size
 init_lr = 0.5  # Initial learning rate before cosine decay
@@ -46,16 +49,16 @@ def main():
 
     # Define train/test datasets and dataloaders
     train_dataset = Spectrogram_Dataset(train_real_root, train_fake_root, train_dur_range, aud_rand_start, spec_size, max_freq_list, dB_min_list, dB_max_list, train_transform)
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
     test_dataset = Spectrogram_Dataset(test_real_root, test_fake_root, test_dur_range, aud_rand_start, spec_size, max_freq_list, dB_min_list, dB_max_list, test_transform)
-    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
     #holdout_dataset = Spectrogram_Dataset(holdout_root, None, test_dur_range, aud_rand_start, spec_size, max_freq_list, dB_min_list, dB_max_list, test_transform)
-    #holdout_dataloader = DataLoader(holdout_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+    #holdout_dataloader = DataLoader(holdout_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
 
     # Define model
     model = resnet18(weights=None, num_classes=2).to(device)
-    if model_state_dict is not None:
-        model.load_state_dict(torch.load(model_state_dict))
+    if model_load_path is not None:
+        model.load_state_dict(torch.load(model_load_path))
     model.train()
 
     # Define optimizer and LR scheduler
@@ -74,10 +77,15 @@ def main():
         _, _, _, _, curr_test_acc = eval_loop(model, test_dataloader)
         if curr_test_acc > best_test_acc:
             print("Saving new best model\n")
-            torch.save(model.state_dict(), f"saved_models/best_resnet_statedict_1.pth")
+            torch.save(model.state_dict(), model_save_path)
             best_test_acc = curr_test_acc
 
-    # holdout_loop(model, holdout_dataloader, holdout_dataset, holdout_csv)
+    # Load best model and test it
+    model.load_state_dict(torch.load(model_save_path))
+    eval_loop(model, test_dataloader, n_eval_epochs=5)
+
+    # holdout_loop(model, holdout_dataloader, n_eval_epochs=5, holdout_csv=holdout_csv)
+
 
 def train_one_epoch(epoch, model, train_dataloader, optimizer, lr_scheduler):
     print("\nTraining 1 epoch")
@@ -96,54 +104,74 @@ def train_one_epoch(epoch, model, train_dataloader, optimizer, lr_scheduler):
         optimizer.step()
         lr_scheduler.step()
 
-def eval_loop(model, test_dataloader):
-    print("\nRunning evaluation")
 
-    n_real_correct = 0
-    n_real = 0
-    n_fake_correct = 0
-    n_fake = 0
+def eval_loop(model, test_dataloader, n_eval_epochs=1):
+    print(f"\nRunning evaluation for {n_eval_epochs} epoch(s)")
+
     model.eval()
     with torch.no_grad():
-        for ii, (images, labels) in enumerate(test_dataloader):
-            images = images.to(device)
-            labels = labels.to(device)
 
-            output = model(images)
+        epoch_preds_tens = torch.zeros(size=(n_eval_epochs, len(test_dataloader.dataset), 2))
+        epoch_label_tens = torch.zeros(size=(len(test_dataloader.dataset),))
+        for eval_epoch in range(n_eval_epochs):
 
-            where_real = torch.where(labels == 1)[0]
-            n_real_correct += torch.sum(torch.argmax(output, dim=1)[where_real] == labels[where_real]).item()
-            n_real += len(where_real)
-            where_fake = torch.where(labels == 0)[0]
-            n_fake_correct += torch.sum(torch.argmax(output, dim=1)[where_fake] == labels[where_fake]).item()
-            n_fake += len(where_fake)
+            for ii, (images, labels) in enumerate(test_dataloader):
+                images = images.to(device)
+                labels = labels.to(device)
+                output = model(images)
 
-    n_real_incorrect = n_real - n_real_correct
-    n_fake_incorrect = n_fake - n_fake_correct
-    print(f"Number of real samples correctly classified: {n_real_correct} ({n_real_correct / n_real * 100}%)")
-    print(f"Number of real samples incorrectly classified: {n_real_incorrect} ({n_real_incorrect / n_real * 100}%)")
-    print(f"Number of fake samples correctly classified: {n_fake_correct} ({n_fake_correct / n_fake * 100}%)")
-    print(f"Number of fake samples incorrectly classified: {n_fake_incorrect} ({n_fake_incorrect / n_fake * 100}%)")
+                # Aggregate model predictions and labels
+                epoch_preds_tens[eval_epoch, ii * batch_size:ii * batch_size + images.size(0), :] = output.detach().cpu()
+                if eval_epoch == 0:
+                    epoch_label_tens[ii * batch_size:ii * batch_size + images.size(0)] = labels.detach().cpu()
+
+        # Sum the predictions across multiple epochs and get the max index
+        final_preds = torch.argmax(torch.sum(epoch_preds_tens, dim=0, keepdim=False), dim=1, keepdim=False)
+
+        where_real = torch.where(epoch_label_tens == 1)[0]
+        where_fake = torch.where(epoch_label_tens == 0)[0]
+        n_real_correct = torch.sum(final_preds[where_real] == epoch_label_tens[where_real]).item()
+        n_real_incorrect = torch.sum(final_preds[where_real] != epoch_label_tens[where_real]).item()
+        n_fake_correct = torch.sum(final_preds[where_fake] == epoch_label_tens[where_fake]).item()
+        n_fake_incorrect = torch.sum(final_preds[where_fake] != epoch_label_tens[where_fake]).item()
+
+    n_real = len(where_real)
+    n_fake = len(where_fake)
+    print(f"Number of real samples correctly classified: {n_real_correct} ({n_real_correct / n_real})")
+    print(f"Number of real samples incorrectly classified: {n_real_incorrect} ({n_real_incorrect / n_real})")
+    print(f"Number of fake samples correctly classified: {n_fake_correct} ({n_fake_correct / n_fake})")
+    print(f"Number of fake samples incorrectly classified: {n_fake_incorrect} ({n_fake_incorrect / n_fake})")
     eval_acc = (n_real_correct + n_fake_correct) / (n_real + n_fake)
     print(f"Test Accuracy: {eval_acc}\n")
     return n_real_correct, n_real_incorrect, n_fake_correct, n_fake_incorrect, eval_acc
 
-def holdout_loop(model, holdout_dataloader, holdout_dataset, holdout_csv):
+
+def holdout_loop(model, holdout_dataloader, n_eval_epochs=1, holdout_csv=None):
     print("\nEvaluating holdout")
 
-    model_preds = []
     model.eval()
     with torch.no_grad():
-        for ii, (images, labels) in enumerate(holdout_dataloader):
-            images = images.to(device)
-            output = model(images)
-            model_preds.extend(torch.argmax(output, dim=1).tolist())
 
-    files_list = [os.path.basename(aud_file) for aud_file in holdout_dataset.real_paths]
-    with open(holdout_csv, "w", newline="") as f:
-        out_writer = csv.writer(f, delimiter=",")
-        for file_pred in zip(files_list, model_preds):
-            out_writer.writerow([file_pred[0], file_pred[1]])
+        epoch_preds_tens = torch.zeros(size=(n_eval_epochs, len(holdout_dataloader.dataset), 2))
+        for eval_epoch in range(n_eval_epochs):
+
+            for ii, (images, labels) in enumerate(holdout_dataloader):
+                images = images.to(device)
+                output = model(images)
+
+                # Aggregate model predictions
+                epoch_preds_tens[eval_epoch, ii * batch_size:ii * batch_size + images.size(0), :] = output.detach().cpu()
+
+        # Sum the predictions across multiple epochs and get the max index
+        final_preds = torch.argmax(torch.sum(epoch_preds_tens, dim=0, keepdim=False), dim=1, keepdim=False)
+
+    if holdout_csv is not None:
+        files_list = [os.path.basename(aud_file) for aud_file in holdout_dataloader.dataset.real_paths]
+        with open(holdout_csv, "w", newline="") as f:
+            out_writer = csv.writer(f, delimiter=",")
+            for file_pred in zip(files_list, final_preds.tolist()):
+                out_writer.writerow([file_pred[0], file_pred[1]])
+
 
 if __name__ == "__main__":
     main()
