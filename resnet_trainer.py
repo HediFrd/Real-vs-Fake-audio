@@ -36,13 +36,12 @@ holdout_transform = test_transform
 
 # Training settings
 model_state_dict = None  # If you want to load a pretrained model file, write the file path here
-# model_state_dict = r"C:\Users\jeremy\Python_Projects\Real-vs-Fake-audio\best_model_statedict_saved.pth"
+# model_state_dict = r"C:\Users\jeremy\Python_Projects\Real-vs-Fake-audio\best_resnet_statedict.pth"
 n_epochs = 10  # Number of training epochs
 batch_size = 16  # Training and evaluation batch size
 init_lr = 0.5  # Initial learning rate before cosine decay
 weight_decay = 1e-4  # Weight decay
 momentum = 0.9  # Momentum
-eval_dataset_frac = 0.2  # Fraction of the evaluation dataset to evaluate - set to 1 to evaluate full dataset
 
 def main():
 
@@ -76,7 +75,7 @@ def main():
         _, _, _, _, curr_test_acc = eval_loop(model, test_dataloader)
         if curr_test_acc > best_test_acc:
             print("Saving new best model\n")
-            torch.save(model.state_dict(), f"best_model_statedict.pth")
+            torch.save(model.state_dict(), f"saved_models/best_resnet_statedict.pth")
             best_test_acc = curr_test_acc
 
     # holdout_loop(model, holdout_dataloader, holdout_dataset, holdout_csv)
@@ -119,9 +118,6 @@ def eval_loop(model, test_dataloader):
             where_fake = torch.where(labels == 0)[0]
             n_fake_correct += torch.sum(torch.argmax(output, dim=1)[where_fake] == labels[where_fake]).item()
             n_fake += len(where_fake)
-
-            if (n_real + n_fake) / (len(test_dataloader) * batch_size) >= eval_dataset_frac:
-                break
 
     n_real_incorrect = n_real - n_real_correct
     n_fake_incorrect = n_fake - n_fake_correct
