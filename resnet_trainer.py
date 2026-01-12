@@ -14,8 +14,9 @@ train_real_root = r"D:\Deep_Detect\dataset\training\real"
 train_fake_root = r"D:\Deep_Detect\dataset\training\fake"
 test_real_root = r"D:\Deep_Detect\dataset\testing\real"
 test_fake_root = r"D:\Deep_Detect\dataset\testing\fake"
+eval_csv = r"C:\Users\jeremy\Python_Projects\Real-vs-Fake-audio\outputs\eval.csv"
 holdout_root = r"D:\Deep_Detect\dataset\holdout"
-holdout_csv = r"C:\Users\jeremy\Python_Projects\Real-vs-Fake-audio\holdout_csv"
+holdout_csv = r"C:\Users\jeremy\Python_Projects\Real-vs-Fake-audio\outputs\holdout.csv"
 train_dur_range = [5, 5]  # Range of audio target durations for training
 test_dur_range = [5, 5]  # Range of audio target durations for testing
 aud_rand_start = True  # Whether to start the audio sampling at a random point
@@ -36,7 +37,7 @@ holdout_transform = test_transform
 
 # Model settings
 model_load_path = None  # Resume training/evaluation from the state_dict here
-model_save_path = r"saved_models/best_resnet_statedict_0.pth"  # After training, save state_dict to here
+model_save_path = r"saved_models/best_resnet_statedict.pth"  # After training, save state_dict to here
 
 # Training settings
 n_epochs = 10  # Number of training epochs
@@ -49,11 +50,11 @@ def main():
 
     # Define train/test datasets and dataloaders
     train_dataset = Spectrogram_Dataset(train_real_root, train_fake_root, train_dur_range, aud_rand_start, spec_size, max_freq_list, dB_min_list, dB_max_list, train_transform)
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
     test_dataset = Spectrogram_Dataset(test_real_root, test_fake_root, test_dur_range, aud_rand_start, spec_size, max_freq_list, dB_min_list, dB_max_list, test_transform)
-    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
     holdout_dataset = Spectrogram_Dataset(holdout_root, None, test_dur_range, aud_rand_start, spec_size, max_freq_list, dB_min_list, dB_max_list, test_transform)
-    holdout_dataloader = DataLoader(holdout_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+    holdout_dataloader = DataLoader(holdout_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
 
     # Define model
     model = resnet18(weights=None, num_classes=2).to(device)
@@ -66,25 +67,26 @@ def main():
     lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=len(train_dataloader) * n_epochs)
 
     # Initial eval
-    eval_loop(model, test_dataloader)
+    eval_loop(model, test_dataloader, n_eval_epochs=5, eval_csv=eval_csv)
 
-    # Training loop
-    best_test_acc = 0.5
-    for epoch in range(n_epochs):
-        train_one_epoch(epoch, model, train_dataloader, optimizer, lr_scheduler)
+    # # Training loop
+    # best_test_acc = 0.5
+    # for epoch in range(n_epochs):
+    #     train_one_epoch(epoch, model, train_dataloader, optimizer, lr_scheduler)
+    #
+    #     # Eval after each epoch
+    #     _, _, _, _, curr_test_acc = eval_loop(model, test_dataloader)
+    #     if curr_test_acc > best_test_acc:
+    #         print("Saving new best model\n")
+    #         torch.save(model.state_dict(), model_save_path)
+    #         best_test_acc = curr_test_acc
+    #
+    # # Load best model and test it
+    # model.load_state_dict(torch.load(model_save_path))
+    # eval_loop(model, test_dataloader, n_eval_epochs=5)
 
-        # Eval after each epoch
-        _, _, _, _, curr_test_acc = eval_loop(model, test_dataloader)
-        if curr_test_acc > best_test_acc:
-            print("Saving new best model\n")
-            torch.save(model.state_dict(), model_save_path)
-            best_test_acc = curr_test_acc
+    holdout_loop(model, holdout_dataloader, n_eval_epochs=5, holdout_csv=holdout_csv)
 
-    # Load best model and test it
-    model.load_state_dict(torch.load(model_save_path))
-    eval_loop(model, test_dataloader, n_eval_epochs=5)
-
-    # holdout_loop(model, holdout_dataloader, n_eval_epochs=5, holdout_csv=holdout_csv)
 
 def train_one_epoch(epoch, model, train_dataloader, optimizer, lr_scheduler):
     print("\nTraining 1 epoch")
@@ -103,25 +105,26 @@ def train_one_epoch(epoch, model, train_dataloader, optimizer, lr_scheduler):
         optimizer.step()
         lr_scheduler.step()
 
-def eval_loop(model, test_dataloader, n_eval_epochs=1):
+
+def eval_loop(model, eval_dataloader, n_eval_epochs=1, eval_csv=None):
     print(f"\nRunning evaluation for {n_eval_epochs} epoch(s)")
 
     model.eval()
     with torch.no_grad():
 
-        epoch_preds_tens = torch.zeros(size=(n_eval_epochs, len(test_dataloader.dataset), 2))
-        epoch_label_tens = torch.zeros(size=(len(test_dataloader.dataset),))
+        epoch_preds_tens = torch.zeros(size=(n_eval_epochs, len(eval_dataloader.dataset), 2))
+        epoch_label_tens = torch.zeros(size=(len(eval_dataloader.dataset),))
         for eval_epoch in range(n_eval_epochs):
 
-            for ii, (images, labels) in enumerate(test_dataloader):
+            for ii, (images, labels) in enumerate(eval_dataloader):
                 images = images.to(device)
                 labels = labels.to(device)
                 output = model(images)
 
                 # Aggregate model predictions and labels
-                epoch_preds_tens[eval_epoch, ii*batch_size:ii*batch_size+images.size(0), :] = output.detach().cpu()
+                epoch_preds_tens[eval_epoch, ii * batch_size:ii * batch_size + images.size(0), :] = output.detach().cpu()
                 if eval_epoch == 0:
-                    epoch_label_tens[ii*batch_size:ii*batch_size+images.size(0)] = labels.detach().cpu()
+                    epoch_label_tens[ii * batch_size:ii * batch_size + images.size(0)] = labels.detach().cpu()
 
         # Sum the predictions across multiple epochs and get the max index
         final_preds = torch.argmax(torch.sum(epoch_preds_tens, dim=0, keepdim=False), dim=1, keepdim=False)
@@ -141,7 +144,16 @@ def eval_loop(model, test_dataloader, n_eval_epochs=1):
     print(f"Number of fake samples incorrectly classified: {n_fake_incorrect} ({n_fake_incorrect / n_fake})")
     eval_acc = (n_real_correct + n_fake_correct) / (n_real + n_fake)
     print(f"Test Accuracy: {eval_acc}\n")
+
+    if eval_csv is not None:
+        files_list = [os.path.basename(aud_file) for aud_file in eval_dataloader.dataset.real_paths + eval_dataloader.dataset.fake_paths]
+        with open(eval_csv, "w", newline="") as f:
+            out_writer = csv.writer(f, delimiter=",")
+            for file_pred in zip(files_list, epoch_label_tens.tolist(), final_preds.tolist()):
+                out_writer.writerow([file_pred[0], file_pred[1], file_pred[2]])
+
     return n_real_correct, n_real_incorrect, n_fake_correct, n_fake_incorrect, eval_acc
+
 
 def holdout_loop(model, holdout_dataloader, n_eval_epochs=1, holdout_csv=None):
     print("\nEvaluating holdout")
